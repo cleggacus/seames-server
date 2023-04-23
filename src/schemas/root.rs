@@ -3,7 +3,7 @@ use std::sync::RwLock;
 use actix_web::cookie::CookieJar;
 use juniper::{graphql_object, RootNode, EmptySubscription};
 
-use crate::{db::DBPool, models::user::{UserResult, UserOperation}, helpers::{validate::Validate, errors::FieldErrors, auth::{set_authed_user, get_authed_user}}};
+use crate::{db::DBPool, models::{user::{UserResult, UserOperation}, repository::{RepositoryOperation, RepositoryResult}}, helpers::{validate::Validate, errors::FieldErrors, auth::{set_authed_user, get_authed_user}}};
 
 pub struct Context {
     pub cookie_jar: RwLock<CookieJar>,
@@ -38,6 +38,11 @@ impl QueryRoot {
 
         user
     }
+
+    fn repository(context: &Context, id: String) -> RepositoryResult {
+        let mut conn = context.db_pool.get().unwrap();
+        RepositoryOperation::find(&mut conn, &id)
+    }
 }
 
 pub struct MutationRoot;
@@ -56,6 +61,11 @@ impl MutationRoot {
 
         let mut conn = context.db_pool.get().unwrap();
         UserOperation::create(&mut conn, &email, &password)
+    }
+
+    fn createRepository(context: &Context, user_id: String, slug: String, name: String, description: Option<String>) -> RepositoryResult {
+        let mut conn = context.db_pool.get().unwrap();
+        RepositoryOperation::create(&mut conn, &user_id, &slug, &name, description.as_deref())
     }
 }
 

@@ -4,7 +4,9 @@ use diesel::{Queryable, Insertable, prelude::*, result::{Error::{NotFound, Datab
 use juniper::graphql_object;
 use nanoid::nanoid;
 
-use crate::{schema::users, db::DBPooledConnection, helpers::errors::ErrorCode, validation_result};
+use crate::{schema::users, db::DBPooledConnection, validation_result, schemas::root::Context, models::repository::Repository};
+
+use super::repository::RepositoryOperation;
 
 #[derive(Queryable)]
 pub struct User {
@@ -18,6 +20,7 @@ pub struct User {
 #[graphql_object(
     name = "User",
     description = "User model",
+    context = Context,
 )]
 impl User {
     #[graphql(description = "The users ID in base64 format")]
@@ -38,6 +41,12 @@ impl User {
     #[graphql(description = "DateTime for when the user was last updated")]
     fn updated_at(&self) -> &NaiveDateTime {
         &self.updated_at
+    }
+
+    #[graphql(description = "The repositories created by the user")]
+    fn repositories(&self, context: &Context) -> Vec<Repository> {
+        let mut conn = context.db_pool.get().unwrap();
+        RepositoryOperation::find_by_user(&mut conn, &self.id)
     }
 }
 

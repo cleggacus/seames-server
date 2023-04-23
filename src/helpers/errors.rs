@@ -1,4 +1,5 @@
 use juniper::{GraphQLObject, GraphQLEnum};
+use crate::schemas::root::Context;
 
 #[derive(GraphQLEnum)]
 pub enum ErrorCode {
@@ -9,6 +10,7 @@ pub enum ErrorCode {
 }
 
 #[derive(GraphQLObject)]
+#[graphql(Context = Context)]
 pub struct FieldError {
     pub field: String,
     pub message: String
@@ -24,6 +26,7 @@ impl FieldError {
 }
 
 #[derive(GraphQLObject)]
+#[graphql(Context = Context)]
 pub struct FieldErrors {
     pub errors: Vec<FieldError>,
 }
@@ -56,6 +59,7 @@ pub struct GeneralError {
 macro_rules! validation_result {
     ($name:ident, $for:ident) => {
         #[derive(juniper::GraphQLUnion)]
+        #[graphql(context = Context)]
         pub enum $name {
             $for($for),
             FieldErrors(crate::helpers::errors::FieldErrors),
@@ -65,28 +69,28 @@ macro_rules! validation_result {
         impl $name {
             pub fn not_found(message: &str) -> $name {
                 $name::GeneralError(crate::helpers::errors::GeneralError {
-                    code: ErrorCode::NotFound,
+                    code: crate::helpers::errors::ErrorCode::NotFound,
                     message: message.into()
                 })
             }
 
             pub fn unauthorized(message: &str) -> $name {
                 $name::GeneralError(crate::helpers::errors::GeneralError {
-                    code: ErrorCode::Unauthorized,
+                    code: crate::helpers::errors::ErrorCode::Unauthorized,
                     message: message.into()
                 })
             }
 
             pub fn conflict(message: &str) -> $name {
                 $name::GeneralError(crate::helpers::errors::GeneralError {
-                    code: ErrorCode::Conflict,
+                    code: crate::helpers::errors::ErrorCode::Conflict,
                     message: message.into()
                 })
             }
 
             pub fn server() -> $name {
                 $name::GeneralError(crate::helpers::errors::GeneralError {
-                    code: ErrorCode::ServerError,
+                    code: crate::helpers::errors::ErrorCode::ServerError,
                     message: "something went wrong".into()
                 })
             }
