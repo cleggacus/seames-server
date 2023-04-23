@@ -6,8 +6,6 @@ use juniper::http::{graphiql::graphiql_source, GraphQLRequest, playground::playg
 
 use crate::{db::DBPool, schemas::root::{Schema, Context, create_schema}};
 
-
-
 #[route("/graphql", method = "GET", method = "POST")]
 pub async fn graphql(
     req: HttpRequest,

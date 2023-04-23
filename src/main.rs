@@ -1,8 +1,9 @@
+pub mod schema;
 pub mod db;
 pub mod handlers;
 pub mod schemas;
-pub mod schema;
-pub mod utils;
+pub mod models;
+pub mod helpers;
 
 use actix_cors::Cors;
 use actix_web::{middleware::Logger, web::Data, App, HttpServer};
@@ -32,3 +33,4 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await
 }
+

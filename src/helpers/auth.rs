@@ -1,15 +1,14 @@
-use diesel::prelude::*;
-use actix_web::cookie::{CookieJar, Cookie, time::Duration};
+use actix_web::cookie::{Cookie, time::Duration, CookieJar};
 use chrono::Utc;
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header, errors::Result, decode, DecodingKey, Validation};
+use jsonwebtoken::{Header, encode, EncodingKey, Validation, Algorithm, decode, DecodingKey};
 use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
 
-use crate::{schemas::{user::User, root::Context}, db::DBPooledConnection};
+use crate::{models::user::{User, UserResult, UserOperation}, db::DBPooledConnection};
 
-pub const ACCESS_TOKEN_DURATION: i64 = 600;     // 10 minuits in seconds
-pub const REFRESH_TOKEN_DURATION: i64 = 129600; // 90 days in seconds
-                                                
+pub const ACCESS_TOKEN_DURATION: i64 = 3600 * 12;           // 12 hours 
+pub const REFRESH_TOKEN_DURATION: i64 = 3600 * 24 * 90;     // 90 days
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AccessTokenClaims {
     pub sub: String,
@@ -17,7 +16,7 @@ pub struct AccessTokenClaims {
     pub exp: usize,
 }
 
-pub fn create_access_token(user: &User) -> Result<String> {
+pub fn create_access_token(user: &User) -> jsonwebtoken::errors::Result<String> {
     let secret = std::env::var("JWT_SECRET")
         .expect("JWT_SECRET must be set");
 
@@ -49,7 +48,6 @@ pub fn decode_access_token(jwt: &str) -> Option<AccessTokenClaims> {
     }
 }
 
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RefreshTokenClaims {
     pub sub: String,
@@ -57,7 +55,7 @@ pub struct RefreshTokenClaims {
     pub exp: usize,
 }
 
-pub fn create_refresh_token(user: &User) -> Result<String> {
+pub fn create_refresh_token(user: &User) -> jsonwebtoken::errors::Result<String> {
     let secret = std::env::var("JWT_SECRET")
         .expect("JWT_SECRET must be set");
 
@@ -89,42 +87,30 @@ pub fn decode_refresh_token(jwt: &str) -> Option<RefreshTokenClaims> {
     }
 }
 
-pub fn get_authed_user(context: &Context) -> Option<User> {
-    use crate::schema::users::dsl::{users, id as user_id};
-
-    let jar = &mut context.cookie_jar.write().unwrap();
-    let conn = &mut context.db_pool.get().unwrap();
-
+pub fn get_authed_user(conn: &mut DBPooledConnection, jar: &mut CookieJar) -> UserResult {
     let access_token = jar.get("access_token");
 
     if access_token.is_none() {
         return refresh_tokens(conn, jar);
     }
 
-    let access_token = decode_access_token(access_token.unwrap().value());
+    let access_token_decoded = decode_access_token(access_token.unwrap().value());
 
-    if access_token.is_none() {
-        return None;
+    if access_token_decoded.is_none() {
+        return UserResult::unauthorized("access token is invalid");
     }
 
-    let access_token = access_token.unwrap();
+    let access_token_data = access_token_decoded.unwrap();
     let now = Utc::now().timestamp() as usize;
 
-    if access_token.exp < now {
+    if access_token_data.exp < now {
         return refresh_tokens(conn, jar);
     }
 
-    let user = users
-        .filter(user_id.eq(access_token.sub))
-        .get_result::<User>(conn);
-
-    match user {
-        Ok(user) => Some(user),
-        Err(_) => None
-    }
+    UserOperation::find(conn, &access_token_data.sub)
 }
 
-pub fn update_token_cookies(user: &User, jar: &mut CookieJar) {
+pub fn set_authed_user(user: &User, jar: &mut CookieJar) {
     let access_token = create_access_token(user).unwrap();
     let refresh_token = create_refresh_token(user).unwrap();
 
@@ -149,38 +135,67 @@ pub fn update_token_cookies(user: &User, jar: &mut CookieJar) {
         );
 }
 
-fn refresh_tokens(conn: &mut DBPooledConnection, jar: &mut CookieJar) -> Option<User> {
-    use crate::schema::users::dsl::{users, id as user_id};
-
+fn refresh_tokens(conn: &mut DBPooledConnection, jar: &mut CookieJar) -> UserResult {
     let refresh_token = jar.get("refresh_token");
-
+    
     if refresh_token.is_none() {
-        return None;
+        return UserResult::unauthorized("no token was provided");
     }
 
-    let refresh_token = decode_refresh_token(refresh_token.unwrap().value());
+    let refresh_token_decoded = decode_refresh_token(refresh_token.unwrap().value());
 
-    if refresh_token.is_none() {
-        return None;
+    if refresh_token_decoded.is_none() {
+        return UserResult::unauthorized("invalid token");
     }
 
+    let refresh_token_data = refresh_token_decoded.unwrap();
     let now = Utc::now().timestamp() as usize;
 
-    let refresh_token = refresh_token.unwrap();
-
-    if refresh_token.exp < now {
-        return None;
+    if refresh_token_data.exp < now {
+        return UserResult::unauthorized("token has expired");
     }
 
-    let user = users
-        .filter(user_id.eq(refresh_token.user_id))
-        .get_result::<User>(conn);
+    let user_result = UserOperation::find(conn, &refresh_token_data.user_id);
 
-    match user {
-        Ok(user) => {
-            update_token_cookies(&user, jar);
-            return Some(user);
-        },
-        Err(_) => None
+    if let UserResult::User(user) = &user_result {
+        set_authed_user(user, jar);
     }
+
+    user_result
 }
+
+// fn refresh_tokens(conn: &mut DBPooledConnection, jar: &mut CookieJar) -> Option<User> {
+//     use crate::schema::users::dsl::{users, id as user_id};
+// 
+//     let refresh_token = jar.get("refresh_token");
+// 
+//     if refresh_token.is_none() {
+//         return None;
+//     }
+// 
+//     let refresh_token = decode_refresh_token(refresh_token.unwrap().value());
+// 
+//     if refresh_token.is_none() {
+//         return None;
+//     }
+// 
+//     let now = Utc::now().timestamp() as usize;
+// 
+//     let refresh_token = refresh_token.unwrap();
+// 
+//     if refresh_token.exp < now {
+//         return None;
+//     }
+// 
+//     let user = users
+//         .filter(user_id.eq(refresh_token.user_id))
+//         .get_result::<User>(conn);
+// 
+//     match user {
+//         Ok(user) => {
+//             update_token_cookies(&user, jar);
+//             return Some(user);
+//         },
+//         Err(_) => None
+//     }
+// }
